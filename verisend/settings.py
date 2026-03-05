@@ -1,27 +1,23 @@
-from typing import Optional
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import SecretStr
-
-from pydantic_settings import BaseSettings
 import urllib.parse
+from typing import Optional
+from pydantic import SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class AppSettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=(".env"),
-    )
+    model_config = SettingsConfigDict(env_file=".env")
 
+    # AI
     api_key: SecretStr
-    datalab_api_key: SecretStr
-    openai_api_key: SecretStr
-
-    mistral_api_key: SecretStr
     gemini_api_key: SecretStr
-    
+
+    # Keycloak
     keycloak_server_url: str
     keycloak_realm: str
     keycloak_client_id: str
     keycloak_client_secret: SecretStr
-    
+
+    # Database
     db_pool_size: int = 20
     db_connection_string: Optional[SecretStr] = None
     db_user: SecretStr
@@ -29,20 +25,30 @@ class AppSettings(BaseSettings):
     db_password: SecretStr
     db_host: str
     db_port: str = "5432"
-    
+
+    # Blob storage
     blob_storage_connection_string: SecretStr
     blob_storage_container_name: str
-    
+
+    # RabbitMQ
+    rabbitmq_url: SecretStr
+    rabbitmq_queue_name: str 
+
     @property
-    def db_conn_str(self):
+    def db_conn_str(self) -> str:
         if self.db_connection_string is not None:
             return self.db_connection_string.get_secret_value()
-        
-        return (
-            f"postgresql://"
-            f"{urllib.parse.quote(self.db_user.get_secret_value())}:"
-            f"{urllib.parse.quote(self.db_password.get_secret_value())}@"
-            f"{self.db_host}:{self.db_port}/{self.db_database}"
-        )
+        user = urllib.parse.quote(self.db_user.get_secret_value())
+        password = urllib.parse.quote(self.db_password.get_secret_value())
+        return f"postgresql://{user}:{password}@{self.db_host}:{self.db_port}/{self.db_database}"
+
+    @property
+    def async_db_conn_str(self) -> str:
+        return self.db_conn_str.replace("postgresql://", "postgresql+asyncpg://")
+
+    @property
+    def sync_db_conn_str(self) -> str:
+        return self.db_conn_str.replace("postgresql://", "postgresql+psycopg2://")
+
 
 settings = AppSettings() # type: ignore
