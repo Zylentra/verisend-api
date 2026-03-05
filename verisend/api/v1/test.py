@@ -10,6 +10,7 @@ from verisend.utils.db import AsyncSession
 from verisend.settings import settings
 from verisend.utils.auth import RequirePublisher
 
+
 TAGS = [
     {
         "name": "Test",
@@ -28,7 +29,7 @@ async def upload_setup(
 ):
     """Upload a document to create a new setup (publisher+ only)"""
     from uuid import uuid4
-    from verisend.workers.tasks import test_task
+    from verisend.workers.tasks import extract_form
 
     content = await file.read()
     file_id = uuid4()
@@ -40,6 +41,7 @@ async def upload_setup(
     url = blob_client.url
     print(f"Blob URL: {url}")
 
-    test_task.delay(url) # type: ignore
+    setup_id = str(uuid4())
+    extract_form.delay(setup_id, url)  # type: ignore
 
     return {"url": url, "file_id": str(file_id)}
