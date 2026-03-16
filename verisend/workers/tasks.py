@@ -15,7 +15,7 @@ from verisend.utils.pdf import extract_page_images
 from verisend.workers.celery_app import celery_app
 from verisend.utils.blob_storage import get_blob_storage_client
 from verisend.utils.db import sync_engine
-from verisend.models.db_models import FormSetup, FormSetupImage, FormSetupSection, ProcessingJob, Status
+from verisend.models.db_models import Form, FormImage, FormSection, ProcessingJob, JobStatus
 from verisend.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -56,26 +56,26 @@ async def _run_all_batches(batch_inputs: list[dict]) -> list[BatchExtractionResu
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=10)
-def extract_form(self, job_id: str, setup_id: str, pdf_url: str, summary: str | None, context: str | None):
+def extract_form(self, job_id: str, form_id: str, pdf_url: str, summary: str | None, context: str | None):
     import nest_asyncio
     nest_asyncio.apply()
 
-    logger.info("Starting extraction: setup=%s", setup_id)
+    logger.info("Starting extraction: form=%s", form_id)
     temp_path = None
 
     with Session(sync_engine) as session:
         job = session.get(ProcessingJob, UUID(job_id))
-        setup = session.get(FormSetup, UUID(setup_id))
+        form = session.get(Form, UUID(form_id))
 
-        if not job or not setup:
-            logger.error("Job or setup not found: job=%s setup=%s", job_id, setup_id)
+        if not job or not form:
+            logger.error("Job or form not found: job=%s form=%s", job_id, form_id)
             return
 
         try:
             # ------------------------------------------------------------------
             # 1. Download PDF
             # ------------------------------------------------------------------
-            _update_job(session, job, status=Status.PROCESSING.value, current_step="Downloading document", progress=5)
+            _update_job(session, job, status=JobStatus.PROCESSING.value, current_step="Downloading document", progress=5)
 
             with httpx.Client(timeout=60.0) as client:
                 r = client.get(pdf_url)
@@ -104,12 +104,12 @@ def extract_form(self, job_id: str, setup_id: str, pdf_url: str, summary: str | 
                 container = blob_service.get_container_client(settings.blob_storage_container_name)
 
                 for page_num, image_data in enumerate(page_images, start=1):
-                    blob_path = f"setups/{setup_id}/pages/page_{page_num}.png"
+                    blob_path = f"forms/{form_id}/pages/page_{page_num}.png"
                     blob_client = container.get_blob_client(blob_path)
                     blob_client.upload_blob(image_data, overwrite=True)
 
-                    db_image = FormSetupImage(
-                        setup_id=UUID(setup_id),
+                    db_image = FormImage(
+                        form_id=UUID(form_id),
                         page_number=page_num,
                         image_url=blob_client.url,
                     )
@@ -166,8 +166,8 @@ def extract_form(self, job_id: str, setup_id: str, pdf_url: str, summary: str | 
             _update_job(session, job, current_step="Saving results", progress=95)
 
             for i, section in enumerate(merged_sections, start=1):
-                db_section = FormSetupSection(
-                    setup_id=UUID(setup_id),
+                db_section = FormSection(
+                    form_id=UUID(form_id),
                     section_number=i,
                     name=section.name,
                     description=section.description,
@@ -177,13 +177,12 @@ def extract_form(self, job_id: str, setup_id: str, pdf_url: str, summary: str | 
                 )
                 session.add(db_section)
 
-            setup.status = Status.REVIEW.value
-            setup.updated_at = datetime.now(timezone.utc)
-            session.add(setup)
+            form.updated_at = datetime.now(timezone.utc)
+            session.add(form)
 
-            _update_job(session, job, status=Status.REVIEW.value, current_step="Done", progress=100)
+            _update_job(session, job, status=JobStatus.DONE.value, current_step="Done", progress=100)
 
-            logger.info("Extraction complete: setup=%s sections=%d", setup_id, len(merged_sections))
+            logger.info("Extraction complete: form=%s sections=%d", form_id, len(merged_sections))
 
             # Keep file output for debugging
             output = [
@@ -196,17 +195,13 @@ def extract_form(self, job_id: str, setup_id: str, pdf_url: str, summary: str | 
                 }
                 for s in merged_sections
             ]
-            output_path = OUTPUT_DIR / f"extraction_{setup_id}.json"
+            output_path = OUTPUT_DIR / f"extraction_{form_id}.json"
             output_path.write_text(json.dumps(output, indent=2))
             logger.info("Result written to %s", output_path)
 
         except Exception as exc:
-            logger.exception("Extraction failed for setup=%s", setup_id)
-            _update_job(session, job, status=Status.FAILED.value, current_step="Failed", error=str(exc), progress=0)
-            setup.status = Status.FAILED.value
-            setup.updated_at = datetime.now(timezone.utc)
-            session.add(setup)
-            session.commit()
+            logger.exception("Extraction failed for form=%s", form_id)
+            _update_job(session, job, status=JobStatus.FAILED.value, current_step="Failed", error=str(exc), progress=0)
             raise self.retry(exc=exc)
 
         finally:
