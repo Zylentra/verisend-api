@@ -392,7 +392,6 @@ async def activate(
 @router.get("/{form_id}/fill", response_model=FormFillResponse)
 async def get_form_for_filling(
     form_id: UUID,
-    auth: Authenticated,
     session: AsyncSession,
 ):
     form = await session.get(Form, form_id)
@@ -409,25 +408,13 @@ async def get_form_for_filling(
     )
     sections = result.all()
 
-    # Load user's standard field values
-    result = await session.exec(
-        select(UserStandardFieldValue)
-        .where(UserStandardFieldValue.user_id == auth.user_id)
-    )
-    standard_values = {sfv.standard_field_key: sfv.value for sfv in result.all()}
-
-    # Build response with pre-populated values
+    # Build response — standard field values are handled client-side via the vault
     styling = StylingResponse(**form.styling) if form.styling else None
 
     section_responses = []
     for s in sections:
         fields = []
         for f in (s.fields or []):
-            value = None
-            key = f.get("standard_field_key")
-            if key and key in standard_values:
-                value = standard_values[key]
-
             fields.append(FillFieldResponse(
                 label=f.get("label", ""),
                 field_type=f.get("field_type", "short_text"),
@@ -435,8 +422,7 @@ async def get_form_for_filling(
                 placeholder=f.get("placeholder"),
                 help_text=f.get("help_text"),
                 options=f.get("options"),
-                standard_field_key=key,
-                value=value,
+                standard_field_key=f.get("standard_field_key"),
             ))
 
         section_responses.append(FillSectionResponse(

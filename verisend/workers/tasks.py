@@ -184,21 +184,6 @@ def extract_form(self, job_id: str, form_id: str, pdf_url: str, summary: str | N
 
             logger.info("Extraction complete: form=%s sections=%d", form_id, len(merged_sections))
 
-            # Keep file output for debugging
-            output = [
-                {
-                    "name": s.name,
-                    "description": s.description,
-                    "page_start": s.page_start,
-                    "page_end": s.page_end,
-                    "fields": [f.model_dump() for f in s.fields],
-                }
-                for s in merged_sections
-            ]
-            output_path = OUTPUT_DIR / f"extraction_{form_id}.json"
-            output_path.write_text(json.dumps(output, indent=2))
-            logger.info("Result written to %s", output_path)
-
         except Exception as exc:
             logger.exception("Extraction failed for form=%s", form_id)
             _update_job(session, job, status=JobStatus.FAILED.value, current_step="Failed", error=str(exc), progress=0)

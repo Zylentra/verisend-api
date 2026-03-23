@@ -84,7 +84,6 @@ class FillFieldResponse(BaseModel):
     help_text: str | None
     options: list[str] | None
     standard_field_key: str | None
-    value: str | None = None
 
 
 class FillSectionResponse(BaseModel):

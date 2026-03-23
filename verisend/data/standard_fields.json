@@ -3,6 +3,7 @@
     "key": "title",
     "label": "Title",
     "field_type": "dropdown",
+    "group": null,
     "default_options": ["Mr", "Mrs", "Ms", "Miss", "Dr", "Prof", "Rev", "Other"],
     "description": "Person's title or honorific. Maps from: Title, Salutation, Honorific, Mr/Mrs/Ms"
   },
@@ -10,90 +11,105 @@
     "key": "first_name",
     "label": "First Name",
     "field_type": "short_text",
+    "group": null,
     "description": "Person's first/given name. Maps from: First Name, Forename, Name (when split)"
   },
   {
     "key": "last_name",
     "label": "Last Name",
     "field_type": "short_text",
+    "group": null,
     "description": "Person's last/family/surname. Maps from: Last Name, Surname, Family Name"
   },
   {
     "key": "full_name",
     "label": "Full Name",
     "field_type": "short_text",
+    "group": null,
     "description": "Person's full name as a single field. Only use when form clearly intends combined name, otherwise split into first_name + last_name"
   },
   {
     "key": "email",
     "label": "Email Address",
     "field_type": "email",
+    "group": null,
     "description": "Email address. Maps from: Email, E-mail, Electronic Mail, Contact Email"
   },
   {
     "key": "phone",
     "label": "Phone Number",
     "field_type": "phone",
+    "group": null,
     "description": "Home or general phone number. Maps from: Tel, Telephone, Phone, Home Phone, Contact Number"
   },
   {
     "key": "mobile_phone",
     "label": "Mobile Phone",
     "field_type": "phone",
+    "group": null,
     "description": "Mobile/cell phone number. Maps from: Cell, Cellphone, Mobile, Mobile Number"
   },
   {
     "key": "date_of_birth",
     "label": "Date of Birth",
     "field_type": "date",
+    "group": null,
     "description": "Person's date of birth. Maps from: DOB, D.O.B, Birth Date, Date of Birth, Born"
   },
   {
     "key": "id_number",
     "label": "ID Number",
     "field_type": "short_text",
+    "group": null,
     "description": "National identity document number. Maps from: ID, ID No, ID Number, Identity Number, RSA ID, National ID"
   },
   {
     "key": "passport_number",
     "label": "Passport Number",
     "field_type": "short_text",
+    "group": null,
     "description": "Passport document number. Maps from: Passport, Passport No, Passport Number"
   },
   {
     "key": "address_line_1",
     "label": "Address Line 1",
     "field_type": "short_text",
+    "group": "address",
     "description": "First line of street address. Maps from: Address, Street Address, Physical Address (first line when split)"
   },
   {
     "key": "address_line_2",
     "label": "Address Line 2",
     "field_type": "short_text",
+    "group": "address",
     "description": "Second line of street address, suburb or apartment. Maps from: Address Line 2, Suburb, Unit/Apt (second line when split)"
   },
   {
     "key": "city",
     "label": "City",
     "field_type": "short_text",
+    "group": "address",
     "description": "City or town name. Maps from: City, Town, Municipality"
   },
   {
     "key": "postal_code",
     "label": "Postal Code",
     "field_type": "short_text",
+    "group": "address",
     "description": "Postal or ZIP code. Maps from: Postal Code, Post Code, ZIP, ZIP Code"
   },
   {
     "key": "country",
     "label": "Country",
     "field_type": "short_text",
+    "group": "address",
     "description": "Country name or code. Maps from: Country, Nation, Country of Residence"
   },
   {
     "key": "gender",
     "label": "Gender",
     "field_type": "radio",
+    "group": null,
     "default_options": ["Male", "Female", "Other"],
     "description": "Person's gender. Maps from: Gender, Sex. Typically radio with options Male/Female/Other"
   },
@@ -101,42 +117,49 @@
     "key": "nationality",
     "label": "Nationality",
     "field_type": "short_text",
+    "group": null,
     "description": "Person's nationality or citizenship. Maps from: Nationality, Citizenship, Country of Birth"
   },
   {
     "key": "employer_name",
     "label": "Employer Name",
     "field_type": "short_text",
+    "group": "employer",
     "description": "Name of employer or company. Maps from: Employer, Company, Place of Work, Organisation, Business Name"
   },
   {
     "key": "job_title",
     "label": "Job Title",
     "field_type": "short_text",
+    "group": "employer",
     "description": "Person's job title or role. Maps from: Position, Designation, Occupation, Job Title, Role"
   },
   {
     "key": "bank_account_number",
     "label": "Bank Account Number",
     "field_type": "short_text",
+    "group": "bank",
     "description": "Bank account number. Maps from: Account No, Account Number, Bank Account"
   },
   {
     "key": "bank_name",
     "label": "Bank Name",
     "field_type": "short_text",
+    "group": "bank",
     "description": "Name of bank. Maps from: Bank, Bank Name, Financial Institution"
   },
   {
     "key": "bank_branch_code",
     "label": "Branch Code",
     "field_type": "short_text",
+    "group": "bank",
     "description": "Bank branch code. Maps from: Branch Code, BSB, Sort Code"
   },
   {
     "key": "signature",
     "label": "Signature",
     "field_type": "signature",
+    "group": null,
     "description": "Signature field. Maps from: Signature, Sign Here, Applicant Signature"
   }
 ]
