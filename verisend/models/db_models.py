@@ -134,6 +134,22 @@ class FormSubmission(SQLModel, table=True):
 # For now any user can fill in any active form.
 
 
+class LoginToken(SQLModel, table=True):
+    __tablename__ = "login_tokens"  # type: ignore
+
+    token: str = Field(primary_key=True, index=True)
+    user_id: str
+    email: str = Field(index=True)
+    expires_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    used: bool = Field(default=False)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
 class UserStandardFieldValue(SQLModel, table=True):
     __tablename__ = "user_standard_field_values"  # type: ignore
     __table_args__ = (UniqueConstraint("user_id", "standard_field_key"),)

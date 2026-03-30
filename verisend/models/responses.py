@@ -6,6 +6,26 @@ from pydantic import BaseModel
 from verisend.models.requests import StylingRequest
 
 
+class SendMagicLinkResponse(BaseModel):
+    message: str
+    email: str
+
+
+class UserInfo(BaseModel):
+    id: str
+    email: str
+    first_name: str | None = ""
+    last_name: str | None = ""
+
+
+class VerifyTokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "Bearer"
+    expires_in: int
+    user: UserInfo
+
+
 class UploadResponse(BaseModel):
     form_id: UUID
     pdf_url: str

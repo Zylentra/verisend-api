@@ -1,7 +1,11 @@
 from uuid import UUID
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
+
+
+class SendMagicLinkRequest(BaseModel):
+    email: EmailStr
 
 
 class ConfirmRequest(BaseModel):

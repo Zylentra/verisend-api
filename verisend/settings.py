@@ -33,6 +33,16 @@ class AppSettings(BaseSettings):
     # RabbitMQ
     rabbitmq_url: SecretStr
     rabbitmq_queue_name: str 
+    
+    # App
+    app_url: str = "http://localhost:5173"
+
+    # Brevo
+    smtp_host: str
+    smtp_port: int
+    smtp_user: str
+    smtp_password: SecretStr
+    smtp_from: str
 
     @property
     def db_conn_str(self) -> str:
