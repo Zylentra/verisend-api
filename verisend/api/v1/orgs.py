@@ -1,12 +1,25 @@
 import asyncio
+import hashlib
+import secrets
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
 from sqlmodel import select
 
-from verisend.models.db_models import Organization, OrgMembership, OrgKeyGrant, User
-from verisend.models.requests import CreateOrgRequest, InviteMemberRequest, CreateKeyGrantRequest
-from verisend.models.responses import OrgResponse, OrgMemberResponse, KeyGrantResponse
+from verisend.models.db_models import Organization, OrgMembership, OrgKeyGrant, OrgApiKey, User
+from verisend.models.requests import (
+    CreateOrgRequest,
+    InviteMemberRequest,
+    CreateKeyGrantRequest,
+    CreateOrgApiKeyRequest,
+)
+from verisend.models.responses import (
+    OrgResponse,
+    OrgMemberResponse,
+    KeyGrantResponse,
+    OrgApiKeyResponse,
+    OrgApiKeyCreatedResponse,
+)
 from verisend.utils.auth import RequireOrgUser
 from verisend.utils.db import AsyncSession
 from verisend.utils.keycloak_admin import KeycloakAdminDep
@@ -270,3 +283,85 @@ async def get_my_key_grant(
         raise HTTPException(status_code=404, detail="No key grant found")
 
     return CreateKeyGrantRequest(encrypted_org_private_key=grant.encrypted_org_private_key)
+
+
+@router.post(
+    "/{org_id}/api-keys",
+    response_model=OrgApiKeyCreatedResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_api_key(
+    org_id: UUID,
+    body: CreateOrgApiKeyRequest,
+    auth: RequireOrgUser,
+    session: AsyncSession,
+):
+    """Create an API key for the org. Owner only. Returns the raw key once."""
+    org = await session.get(Organization, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    await _require_org_owner(session, org, UUID(auth.user_id))
+
+    # Generate a random API key and store only the hash
+    raw_key = secrets.token_urlsafe(48)
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+
+    api_key = OrgApiKey(
+        org_id=org_id,
+        name=body.name,
+        key_hash=key_hash,
+        public_key=body.public_key,
+        encrypted_private_key=body.encrypted_private_key,
+        encrypted_org_private_key=body.encrypted_org_private_key,
+    )
+    session.add(api_key)
+    await session.commit()
+    await session.refresh(api_key)
+
+    return OrgApiKeyCreatedResponse(
+        id=api_key.id,
+        org_id=api_key.org_id,
+        name=api_key.name,
+        created_at=api_key.created_at,
+        api_key=raw_key,
+    )
+
+
+@router.get("/{org_id}/api-keys", response_model=list[OrgApiKeyResponse])
+async def list_api_keys(
+    org_id: UUID,
+    auth: RequireOrgUser,
+    session: AsyncSession,
+):
+    """List API keys for the org. Owner only."""
+    org = await session.get(Organization, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    await _require_org_owner(session, org, UUID(auth.user_id))
+
+    result = await session.exec(select(OrgApiKey).where(OrgApiKey.org_id == org_id))
+    return result.all()
+
+
+@router.delete("/{org_id}/api-keys/{api_key_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_api_key(
+    org_id: UUID,
+    api_key_id: UUID,
+    auth: RequireOrgUser,
+    session: AsyncSession,
+):
+    """Delete an API key. Owner only."""
+    org = await session.get(Organization, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    await _require_org_owner(session, org, UUID(auth.user_id))
+
+    api_key = await session.get(OrgApiKey, api_key_id)
+    if not api_key or api_key.org_id != org_id:
+        raise HTTPException(status_code=404, detail="API key not found")
+
+    await session.delete(api_key)
+    await session.commit()

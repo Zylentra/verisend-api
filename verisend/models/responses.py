@@ -119,6 +119,18 @@ class KeyGrantResponse(BaseModel):
     created_at: datetime
 
 
+class OrgApiKeyResponse(BaseModel):
+    id: UUID
+    org_id: UUID
+    name: str
+    created_at: datetime
+
+
+class OrgApiKeyCreatedResponse(OrgApiKeyResponse):
+    """Returned only at creation time — includes the raw API key (shown once)."""
+    api_key: str
+
+
 class SubmitFormResponse(BaseModel):
     submission_id: UUID
 

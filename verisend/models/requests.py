@@ -85,6 +85,13 @@ class CreateKeyGrantRequest(BaseModel):
     encrypted_org_private_key: str  # encrypted with the member's public key
 
 
+class CreateOrgApiKeyRequest(BaseModel):
+    name: str
+    public_key: str
+    encrypted_private_key: str
+    encrypted_org_private_key: str
+
+
 class StylingRequest(BaseModel):
     primary_color: str
     accent_color: str
