@@ -14,8 +14,6 @@ from verisend.settings import settings
 from verisend.models.authenticated_user import AuthenticatedUser
 
 
-ROLE_HIERARCHY = [Role.USER, Role.PUBLISHER, Role.ADMIN, Role.SUPER_ADMIN]
-
 class FormsAuthenticationConfig(BaseModel):
     api_key: Optional[SecretStr] = None
     
@@ -49,13 +47,11 @@ class VerifyToken:
         self.config = settings
         jwks_url = f'{self.config.keycloak_server_url}/realms/{self.config.keycloak_realm}/protocol/openid-connect/certs'
         self.jwks_client = jwt.PyJWKClient(jwks_url, headers={"User-Agent": "forms-api/1.0"})
-        # self.jwks_client = jwt.PyJWKClient(jwks_url)
     
     async def verify_bearer_token(self, token: str) -> dict:
         """Verify bearer token and return payload"""
         try:
             signing_key = self.jwks_client.get_signing_key_from_jwt(token).key
-            print("signing key working")
         except jwt.exceptions.PyJWKClientError as error:
             raise UnauthorizedException(str(error))
         except jwt.exceptions.DecodeError as error:
@@ -104,7 +100,7 @@ class Authentication:
                     user_id="api-key-user",
                     auth_type="api_key",
                     authenticated=True,
-                    role=Role.SUPER_ADMIN,
+                    role=Role.ADMIN,
                 )
             else:
                 # API key provided but invalid - don't try bearer token
@@ -163,24 +159,20 @@ Authenticated = Annotated[AuthenticatedUser, Depends(authentication)]
 
 
 class RoleChecker:
-    """Dependency that checks if user has minimum required role"""
-    
-    def __init__(self, minimum_role: Role):
-        self.minimum_role = minimum_role
-        self.min_level = ROLE_HIERARCHY.index(minimum_role)
-    
+    """Dependency that checks if user has the required role"""
+
+    def __init__(self, role: Role):
+        self.role = role
+
     def __call__(self, auth: AuthenticatedUser = Depends(authentication)) -> AuthenticatedUser:
-        user_level = ROLE_HIERARCHY.index(auth.role)
-        
-        if user_level < self.min_level:
+        if auth.role != self.role:
             raise HTTPException(
                 status_code=HTTP_403_FORBIDDEN,
-                detail=f"Requires minimum role: {self.minimum_role.value}"
+                detail=f"Requires role: {self.role.value}"
             )
         return auth
 
 
-RequireSuperAdmin = Annotated[AuthenticatedUser, Depends(RoleChecker(Role.SUPER_ADMIN))]
 RequireAdmin = Annotated[AuthenticatedUser, Depends(RoleChecker(Role.ADMIN))]
-RequirePublisher = Annotated[AuthenticatedUser, Depends(RoleChecker(Role.PUBLISHER))]
+RequireOrgUser = Annotated[AuthenticatedUser, Depends(RoleChecker(Role.ORG_USER))]
 RequireUser = Annotated[AuthenticatedUser, Depends(RoleChecker(Role.USER))]

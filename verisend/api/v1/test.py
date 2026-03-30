@@ -8,7 +8,7 @@ from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from verisend.utils.blob_storage import BlobStorageContainer
 from verisend.utils.db import AsyncSession
 from verisend.settings import settings
-from verisend.utils.auth import RequirePublisher
+from verisend.utils.auth import RequireOrgUser
 
 
 TAGS = [
@@ -22,7 +22,7 @@ router = APIRouter(tags=["Test"], prefix="/test")
 
 @router.post("/test-upload", status_code=status.HTTP_201_CREATED)
 async def upload_setup(
-    auth: RequirePublisher,
+    auth: RequireOrgUser,
     session: AsyncSession,
     container: BlobStorageContainer,
     file: UploadFile = File(...),
