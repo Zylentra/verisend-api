@@ -1,3 +1,4 @@
+import hashlib
 import warnings
 from functools import lru_cache
 from typing import Optional, Annotated
@@ -8,6 +9,7 @@ from fastapi.security.api_key import APIKeyHeader
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi import Depends
 from pydantic import BaseModel, SecretStr, field_validator
+from sqlmodel import select
 import jwt
 from verisend.models.roles import Role
 from verisend.settings import settings
@@ -92,22 +94,43 @@ class Authentication:
         Returns AuthenticatedUser model or raises HTTPException.
         """
         auth_settings = get_auth_settings()
-        
+
         # Try API key authentication first
-        if api_key and auth_settings.api_key:
-            if api_key == auth_settings.api_key.get_secret_value():
+        if api_key:
+            # Check admin API key (from env)
+            if auth_settings.api_key and api_key == auth_settings.api_key.get_secret_value():
                 return AuthenticatedUser(
                     user_id="api-key-user",
                     auth_type="api_key",
                     authenticated=True,
                     role=Role.ADMIN,
                 )
-            else:
-                # API key provided but invalid - don't try bearer token
-                raise HTTPException(
-                    status_code=HTTP_403_FORBIDDEN,
-                    detail="Invalid API key"
+
+            # TODO: Use a cache/keystore (e.g. Redis or in memory keystore) instead of hitting the DB on every request...
+            # Check org API keys (from DB)
+            from verisend.models.db_models import OrgApiKey
+            from verisend.utils.db import get_async_session
+
+            key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+            async for session in get_async_session():
+                result = await session.exec(
+                    select(OrgApiKey).where(OrgApiKey.key_hash == key_hash)
                 )
+                org_key = result.first()
+
+            if org_key:
+                return AuthenticatedUser(
+                    user_id=f"api-key-{org_key.id}",
+                    auth_type="org_api_key",
+                    authenticated=True,
+                    role=Role.ORG_USER,
+                    org_id=str(org_key.org_id),
+                )
+
+            raise HTTPException(
+                status_code=HTTP_403_FORBIDDEN,
+                detail="Invalid API key"
+            )
         
         if bearer_token:
             try:

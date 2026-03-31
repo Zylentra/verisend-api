@@ -8,6 +8,7 @@ class AuthenticatedUser(BaseModel):
     auth_type: str
     authenticated: bool
     role: Role = Role.USER
+    org_id: str | None = None  # set for org API key auth
     email: str | None = None
     name: str | None = None
     payload: Optional[dict] = None

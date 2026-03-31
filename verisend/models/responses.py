@@ -191,6 +191,28 @@ class FillSectionResponse(BaseModel):
     fields: list[FillFieldResponse]
 
 
+class ApiSubmissionListItem(BaseModel):
+    submission_id: UUID
+    form_id: UUID
+    form_name: str
+    user_id: UUID
+    email: str
+    data_url: str | None
+    completed_at: datetime | None
+    created_at: datetime
+
+
+class ApiSubmissionDetailResponse(ApiSubmissionListItem):
+    encrypted_private_key: str
+    encrypted_org_private_key: str
+
+
+class ApiSubmissionsListResponse(BaseModel):
+    submissions: list[ApiSubmissionListItem]
+    encrypted_private_key: str
+    encrypted_org_private_key: str
+
+
 class FormFillResponse(BaseModel):
     form_id: UUID
     name: str

@@ -126,10 +126,6 @@ async def verify_magic_link(
             detail=f"Authentication failed: {e}",
         )
 
-    # TODO: Remove this debug logging
-    logger.info(f"Access token: {keycloak_token['access_token']}")
-    logger.info(f"Refresh token: {keycloak_token['refresh_token']}")
-
     # Get user details
     user = await asyncio.to_thread(keycloak.get_user_by_id, user_id)
 

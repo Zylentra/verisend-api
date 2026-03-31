@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from . import (
+    api,
     test,
     forms,
     orgs,
@@ -9,6 +10,7 @@ from . import (
 
 
 TAGS = [
+    *api.TAGS,
     *test.TAGS,
     *forms.TAGS,
     *orgs.TAGS,
@@ -17,6 +19,7 @@ TAGS = [
 ]
 
 router = APIRouter()
+router.include_router(api.router)
 router.include_router(test.router)
 router.include_router(forms.router)
 router.include_router(orgs.router)
