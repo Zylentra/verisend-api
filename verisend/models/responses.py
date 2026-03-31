@@ -131,6 +131,11 @@ class OrgApiKeyCreatedResponse(OrgApiKeyResponse):
     api_key: str
 
 
+class KeypairStatusResponse(BaseModel):
+    has_keypair: bool
+    public_key: str | None
+
+
 class SubmitFormResponse(BaseModel):
     submission_id: UUID
 
