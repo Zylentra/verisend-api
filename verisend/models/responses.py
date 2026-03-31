@@ -26,6 +26,12 @@ class VerifyTokenResponse(BaseModel):
     user: UserInfo
 
 
+class RefreshTokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    expires_in: int
+
+
 class UploadResponse(BaseModel):
     form_id: UUID
     pdf_url: str
@@ -112,6 +118,7 @@ class OrgMemberResponse(BaseModel):
     user_id: UUID
     email: str
     has_public_key: bool
+    public_key: str | None
     has_key_grant: bool
     created_at: datetime
 
@@ -140,10 +147,17 @@ class KeypairStatusResponse(BaseModel):
     encrypted_private_key: str | None
 
 
+class UserOrgResponse(BaseModel):
+    org_id: UUID
+    name: str
+    is_owner: bool
+
+
 class MeResponse(BaseModel):
     id: str
     email: str
     has_keypair: bool
+    orgs: list[UserOrgResponse]
 
 
 class SubmissionListItem(BaseModel):

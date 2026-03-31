@@ -8,6 +8,10 @@ class SendMagicLinkRequest(BaseModel):
     email: EmailStr
 
 
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
 class ConfirmRequest(BaseModel):
     name: str
     summary: str | None = None

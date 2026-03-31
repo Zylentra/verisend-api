@@ -105,6 +105,29 @@ class KeycloakAdminService:
 
         return response.json()
 
+    def refresh_tokens(self, refresh_token: str) -> dict:
+        """Refresh an access token using a refresh token."""
+        token_url = (
+            f"{settings.keycloak_server_url}/realms/{settings.keycloak_realm}"
+            f"/protocol/openid-connect/token"
+        )
+
+        response = httpx.post(
+            token_url,
+            data={
+                "grant_type": "refresh_token",
+                "client_id": settings.keycloak_client_id,
+                "client_secret": settings.keycloak_client_secret.get_secret_value(),
+                "refresh_token": refresh_token,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+
+        if response.status_code != 200:
+            raise Exception(f"{response.status_code}: {response.text}")
+
+        return response.json()
+
 
 keycloak_admin_service = KeycloakAdminService()
 

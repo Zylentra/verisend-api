@@ -298,7 +298,7 @@ async def run_batch(
 
     result = await extraction_agent.run(
         message_content,
-        system_prompt=system_prompt,
+        instructions=system_prompt,
     )
     return result.output
 

@@ -1,12 +1,15 @@
 import asyncio
 import hashlib
 import secrets
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
 from sqlmodel import select
 
-from verisend.models.db_models import Organization, OrgMembership, OrgKeyGrant, OrgApiKey, User
+from verisend.models.db_models import LoginToken, Organization, OrgMembership, OrgKeyGrant, OrgApiKey, User
+from verisend.settings import settings
+from verisend.utils.email import send_magic_link_email
 from verisend.models.requests import (
     CreateOrgRequest,
     InviteMemberRequest,
@@ -143,6 +146,7 @@ async def list_members(
             user_id=user.id,
             email=user.email,
             has_public_key=user.public_key is not None,
+            public_key=user.public_key,
             has_key_grant=user.id in granted_user_ids,
             created_at=membership.created_at,
         )
@@ -174,8 +178,11 @@ async def invite_member(
 
     kc_user_id = UUID(kc_user["id"])
 
-    # Ensure local user record exists
+    # Ensure local user record exists (check by ID first, then by email)
     user = await session.get(User, kc_user_id)
+    if not user:
+        result = await session.exec(select(User).where(User.email == email))
+        user = result.first()
     if not user:
         user = User(id=kc_user_id, email=email)
         session.add(user)
@@ -194,16 +201,34 @@ async def invite_member(
     membership = OrgMembership(org_id=org_id, user_id=kc_user_id)
     session.add(membership)
 
+    # Capture user values before commit (avoids lazy-load after session expires attributes)
+    user_public_key = user.public_key
+
     # Assign org_user role in Keycloak
     await asyncio.to_thread(keycloak.assign_role, str(kc_user_id), Role.ORG_USER)
+
+    # Send magic link email to the invited user
+    token = secrets.token_urlsafe(32)
+    login_token = LoginToken(
+        token=token,
+        user_id=str(kc_user_id),
+        email=email,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=72),
+        used=False,
+    )
+    session.add(login_token)
 
     await session.commit()
     await session.refresh(membership)
 
+    magic_link = f"{settings.app_url}/auth/verify?token={token}"
+    await send_magic_link_email(email, magic_link)
+
     return OrgMemberResponse(
-        user_id=user.id,
-        email=user.email,
-        has_public_key=user.public_key is not None,
+        user_id=kc_user_id,
+        email=email,
+        has_public_key=user_public_key is not None,
+        public_key=user_public_key,
         has_key_grant=False,
         created_at=membership.created_at,
     )

@@ -12,8 +12,9 @@ from verisend.utils.keycloak_admin import KeycloakAdminDep
 from verisend.utils.email import send_magic_link_email
 from verisend.models.db_models import LoginToken, User
 from uuid import UUID
-from verisend.models.requests import SendMagicLinkRequest
+from verisend.models.requests import RefreshTokenRequest, SendMagicLinkRequest
 from verisend.models.responses import (
+    RefreshTokenResponse,
     SendMagicLinkResponse,
     VerifyTokenResponse,
     UserInfo,
@@ -139,4 +140,26 @@ async def verify_magic_link(
             first_name=user.get("firstName", ""),
             last_name=user.get("lastName", ""),
         ),
+    )
+
+
+@router.post("/refresh", response_model=RefreshTokenResponse)
+async def refresh_token(
+    body: RefreshTokenRequest,
+    keycloak: KeycloakAdminDep,
+):
+    """Refresh an access token using a refresh token."""
+    try:
+        tokens = await asyncio.to_thread(keycloak.refresh_tokens, body.refresh_token)
+    except Exception as e:
+        print(e)
+        raise HTTPException(
+            status_code=401,
+            detail=f"Token refresh failed: {e}",
+        )
+
+    return RefreshTokenResponse(
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+        expires_in=tokens["expires_in"],
     )

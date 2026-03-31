@@ -1,7 +1,8 @@
 import asyncio
 import logging
+import secrets
 from uuid import UUID, uuid4
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, status
 from sqlmodel import select
@@ -10,9 +11,11 @@ from verisend.utils.blob_storage import BlobStorageContainer
 from verisend.utils.db import AsyncSession
 from verisend.utils.keycloak_admin import KeycloakAdminDep
 from verisend.models.db_models import (
-    Form, FormSection, FormSubmission, JobStatus,
+    Form, FormSection, FormSubmission, JobStatus, LoginToken,
     Organization, OrgMembership, ProcessingJob, User,
 )
+from verisend.settings import settings
+from verisend.utils.email import send_magic_link_email
 from verisend.utils.auth import Authenticated, RequireOrgUser
 from verisend.models.requests import AssignFormRequest, ConfirmRequest, ExtractStylingRequest, StylingRequest, UpdateSectionsRequest
 from verisend.models.responses import (
@@ -222,6 +225,7 @@ async def confirm(
 
     now = datetime.now(timezone.utc)
     job_id = uuid4()
+    pdf_url = form.pdf_url
 
     form.name = body.name
     form.summary = body.summary
@@ -240,7 +244,7 @@ async def confirm(
     session.add(job)
     await session.commit()
 
-    extract_form.delay(str(job_id), str(form_id), form.pdf_url, body.summary, body.context)
+    extract_form.delay(str(job_id), str(form_id), pdf_url, body.summary, body.context)
 
     return ConfirmResponse(form_id=form_id, job_id=job_id)
 
@@ -486,14 +490,31 @@ async def assign_form(
     if existing.first():
         raise HTTPException(status_code=409, detail="Form is already assigned to this user")
 
+    submission_id = uuid4()
     submission = FormSubmission(
+        id=submission_id,
         form_id=form_id,
         user_id=kc_user_id,
     )
     session.add(submission)
+
+    # Send magic link to the assigned user
+    token = secrets.token_urlsafe(32)
+    login_token = LoginToken(
+        token=token,
+        user_id=str(kc_user_id),
+        email=email,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        used=False,
+    )
+    session.add(login_token)
+
     await session.commit()
 
-    return {"submission_id": str(submission.id), "email": email}
+    magic_link = f"{settings.app_url}/auth/verify?token={token}"
+    await send_magic_link_email(email, magic_link)
+
+    return {"submission_id": str(submission_id), "email": email}
 
 
 # =============================================================================
