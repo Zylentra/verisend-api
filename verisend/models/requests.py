@@ -51,10 +51,6 @@ class FieldSubmission(BaseModel):
     value: str | None = None
 
 
-class SubmitFormRequest(BaseModel):
-    fields: list[FieldSubmission]
-
-
 class StandardFieldRequest(BaseModel):
     key: str
     label: str
@@ -86,6 +82,10 @@ class InviteMemberRequest(BaseModel):
 
 class CreateKeyGrantRequest(BaseModel):
     encrypted_org_private_key: str  # encrypted with the member's public key
+
+
+class AssignFormRequest(BaseModel):
+    email: EmailStr
 
 
 class SetupKeypairRequest(BaseModel):

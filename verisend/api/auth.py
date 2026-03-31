@@ -10,7 +10,8 @@ from verisend.settings import settings
 from verisend.utils.db import AsyncSession
 from verisend.utils.keycloak_admin import KeycloakAdminDep
 from verisend.utils.email import send_magic_link_email
-from verisend.models.db_models import LoginToken
+from verisend.models.db_models import LoginToken, User
+from uuid import UUID
 from verisend.models.requests import SendMagicLinkRequest
 from verisend.models.responses import (
     SendMagicLinkResponse,
@@ -43,9 +44,17 @@ async def send_magic_link(
     email = request.email.lower()
 
     # Find or create user in Keycloak (sync calls → offload to thread)
-    user = await asyncio.to_thread(keycloak.find_user_by_email, email)
-    if not user:
-        user = await asyncio.to_thread(keycloak.create_user, email)
+    kc_user = await asyncio.to_thread(keycloak.find_user_by_email, email)
+    if not kc_user:
+        kc_user = await asyncio.to_thread(keycloak.create_user, email)
+
+    kc_user_id = UUID(kc_user["id"])
+
+    # Ensure local user record exists
+    db_user = await session.get(User, kc_user_id)
+    if not db_user:
+        db_user = User(id=kc_user_id, email=email)
+        session.add(db_user)
 
     # Generate secure random token
     token = secrets.token_urlsafe(32)
@@ -53,7 +62,7 @@ async def send_magic_link(
     # Store token in database
     login_token = LoginToken(
         token=token,
-        user_id=user["id"],
+        user_id=str(kc_user_id),
         email=email,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
         used=False,

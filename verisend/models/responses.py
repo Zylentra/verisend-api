@@ -169,5 +169,6 @@ class FormFillResponse(BaseModel):
     form_id: UUID
     name: str
     summary: str | None
+    public_key: str
     styling: StylingResponse | None
     sections: list[FillSectionResponse]

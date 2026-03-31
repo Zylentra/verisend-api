@@ -20,7 +20,7 @@ from verisend.models.responses import (
     OrgApiKeyResponse,
     OrgApiKeyCreatedResponse,
 )
-from verisend.utils.auth import RequireOrgUser
+from verisend.utils.auth import Authenticated, RequireOrgUser
 from verisend.utils.db import AsyncSession
 from verisend.utils.keycloak_admin import KeycloakAdminDep
 from verisend.models.roles import Role
@@ -59,11 +59,16 @@ async def _require_org_owner(session: AsyncSession, org: Organization, user_id: 
 @router.post("", response_model=OrgResponse, status_code=status.HTTP_201_CREATED)
 async def create_org(
     body: CreateOrgRequest,
-    auth: RequireOrgUser,
+    auth: Authenticated,
     session: AsyncSession,
+    keycloak: KeycloakAdminDep,
 ):
     """Create a new organization. The authenticated user becomes the owner."""
     user_id = UUID(auth.user_id)
+
+    # Assign org_user role if the user doesn't already have it
+    if auth.role != Role.ORG_USER:
+        await asyncio.to_thread(keycloak.assign_role, auth.user_id, Role.ORG_USER)
 
     org = Organization(
         name=body.name,

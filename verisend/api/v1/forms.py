@@ -1,15 +1,20 @@
+import asyncio
 import logging
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, status
 from sqlmodel import select
 
 from verisend.utils.blob_storage import BlobStorageContainer
 from verisend.utils.db import AsyncSession
-from verisend.models.db_models import Form, FormSection, FormSubmission, JobStatus, ProcessingJob
-from verisend.utils.auth import Authenticated
-from verisend.models.requests import ConfirmRequest, ExtractStylingRequest, SubmitFormRequest, StylingRequest, UpdateSectionsRequest
+from verisend.utils.keycloak_admin import KeycloakAdminDep
+from verisend.models.db_models import (
+    Form, FormSection, FormSubmission, JobStatus,
+    Organization, OrgMembership, ProcessingJob, User,
+)
+from verisend.utils.auth import Authenticated, RequireOrgUser
+from verisend.models.requests import AssignFormRequest, ConfirmRequest, ExtractStylingRequest, StylingRequest, UpdateSectionsRequest
 from verisend.models.responses import (
     ConfirmResponse,
     FieldResponse,
@@ -42,38 +47,42 @@ router = APIRouter(prefix="/forms", tags=["forms"])
 
 
 # =============================================================================
-# Endpoints
+# Helpers
+# =============================================================================
+
+async def _get_user_org(session: AsyncSession, user_id: UUID) -> OrgMembership:
+    """Get the user's org membership. Raises 403 if not in any org."""
+    result = await session.exec(
+        select(OrgMembership).where(OrgMembership.user_id == user_id)
+    )
+    membership = result.first()
+    if not membership:
+        raise HTTPException(status_code=403, detail="User is not a member of any organization")
+    return membership
+
+
+async def _get_org_form(session: AsyncSession, form_id: UUID, org_id: UUID) -> Form:
+    """Get a form, verifying it belongs to the org and is not deleted."""
+    form = await session.get(Form, form_id)
+    if not form or form.is_deleted or form.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Form not found")
+    return form
+
+
+# =============================================================================
+# Org user endpoints (form management)
 # =============================================================================
 
 @router.get("/active", response_model=list[FormListItem])
-async def list_active_forms(session: AsyncSession):
+async def list_active_forms(
+    auth: RequireOrgUser,
+    session: AsyncSession,
+):
+    """List active forms for the authenticated user's org."""
+    membership = await _get_user_org(session, UUID(auth.user_id))
     statement = (
         select(Form)
-        .where(Form.is_active == True, Form.is_deleted == False)
-        .order_by(Form.updated_at.desc())
-    )
-    result = await session.exec(statement)
-    return [
-        FormListItem(
-            form_id=f.id,
-            name=f.name,
-            original_filename=f.original_filename,
-            is_active=f.is_active,
-            created_at=f.created_at,
-            updated_at=f.updated_at,
-        )
-        for f in result.all()
-    ]
-
-
-# TODO: For the PoC this returns all active forms. Once FormAssignment is
-# implemented, filter by forms assigned to the authenticated user. Kept as a
-# separate endpoint so the frontend has a clear separation of concerns.
-@router.get("/assigned", response_model=list[FormListItem])
-async def list_assigned_forms(session: AsyncSession):
-    statement = (
-        select(Form)
-        .where(Form.is_active == True, Form.is_deleted == False)
+        .where(Form.org_id == membership.org_id, Form.is_active == True, Form.is_deleted == False)
         .order_by(Form.updated_at.desc())
     )
     result = await session.exec(statement)
@@ -91,10 +100,15 @@ async def list_assigned_forms(session: AsyncSession):
 
 
 @router.get("/drafts", response_model=list[FormListItem])
-async def list_draft_forms(session: AsyncSession):
+async def list_draft_forms(
+    auth: RequireOrgUser,
+    session: AsyncSession,
+):
+    """List draft forms for the authenticated user's org."""
+    membership = await _get_user_org(session, UUID(auth.user_id))
     statement = (
         select(Form)
-        .where(Form.is_active == False, Form.is_deleted == False)
+        .where(Form.org_id == membership.org_id, Form.is_active == False, Form.is_deleted == False)
         .order_by(Form.updated_at.desc())
     )
     result = await session.exec(statement)
@@ -111,11 +125,40 @@ async def list_draft_forms(session: AsyncSession):
     ]
 
 
+@router.get("/assigned", response_model=list[FormListItem])
+async def list_assigned_forms(
+    auth: Authenticated,
+    session: AsyncSession,
+):
+    """List forms assigned to the authenticated user (pending submissions)."""
+    result = await session.exec(
+        select(Form)
+        .join(FormSubmission)
+        .where(
+            FormSubmission.user_id == UUID(auth.user_id),
+            FormSubmission.completed_at == None,
+            Form.is_active == True,
+            Form.is_deleted == False,
+        )
+        .order_by(Form.updated_at.desc())
+    )
+    return [
+        FormListItem(
+            form_id=f.id,
+            name=f.name,
+            original_filename=f.original_filename,
+            is_active=f.is_active,
+            created_at=f.created_at,
+            updated_at=f.updated_at,
+        )
+        for f in result.all()
+    ]
+
+
 @router.post("/styling/extract", response_model=StylingResponse)
-async def extract_styling(body: ExtractStylingRequest):
+async def extract_styling(body: ExtractStylingRequest, auth: RequireOrgUser):
     try:
         extracted = await extract_styling_from_url(body.url, body.available_fonts)
-        print(f"Extracted styling: {extracted}")
     except Exception as e:
         logger.exception("Styling extraction failed for URL: %s", body.url)
         raise HTTPException(status_code=422, detail=f"Could not extract styling: {e}")
@@ -124,25 +167,29 @@ async def extract_styling(body: ExtractStylingRequest):
 
 @router.post("/upload", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload(
+    auth: RequireOrgUser,
+    session: AsyncSession,
+    container: BlobStorageContainer,
     file: UploadFile = File(...),
-    container: BlobStorageContainer = ...,
-    session: AsyncSession = ...,
 ):
+    membership = await _get_user_org(session, UUID(auth.user_id))
+
     form_id = uuid4()
     now = datetime.now(timezone.utc)
 
-    # Upload to blob first
+    # Upload to blob
     blob_path = f"forms/{form_id}/original/{file.filename}"
     blob_client = container.get_blob_client(blob_path)
     contents = await file.read()
     blob_client.upload_blob(contents, overwrite=True)
     pdf_url = blob_client.url
 
-    # Summarise while we have the URL
+    # Summarise
     result = await summarise_form(pdf_url)
 
     form = Form(
         id=form_id,
+        org_id=membership.org_id,
         name=result.name,
         original_filename=file.filename or "",
         pdf_url=pdf_url,
@@ -165,16 +212,14 @@ async def upload(
 async def confirm(
     form_id: UUID,
     body: ConfirmRequest,
+    auth: RequireOrgUser,
     session: AsyncSession,
 ):
-    form = await session.get(Form, form_id)
-    if not form:
-        raise HTTPException(status_code=404, detail="Form not found")
+    membership = await _get_user_org(session, UUID(auth.user_id))
+    form = await _get_org_form(session, form_id, membership.org_id)
 
     now = datetime.now(timezone.utc)
     job_id = uuid4()
-
-    pdf_url = form.pdf_url
 
     form.name = body.name
     form.summary = body.summary
@@ -193,7 +238,7 @@ async def confirm(
     session.add(job)
     await session.commit()
 
-    extract_form.delay(str(job_id), str(form_id), pdf_url, body.summary, body.context)
+    extract_form.delay(str(job_id), str(form_id), form.pdf_url, body.summary, body.context)
 
     return ConfirmResponse(form_id=form_id, job_id=job_id)
 
@@ -201,8 +246,12 @@ async def confirm(
 @router.get("/{form_id}/status", response_model=JobStatusResponse)
 async def get_status(
     form_id: UUID,
+    auth: RequireOrgUser,
     session: AsyncSession,
 ):
+    membership = await _get_user_org(session, UUID(auth.user_id))
+    await _get_org_form(session, form_id, membership.org_id)
+
     statement = select(ProcessingJob).where(ProcessingJob.form_id == form_id)
     result = await session.exec(statement)
     job = result.first()
@@ -210,31 +259,23 @@ async def get_status(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    job_id = job.id
-    job_status = job.status
-    job_progress = job.progress
-    job_step = job.current_step
-
     return JobStatusResponse(
         form_id=form_id,
-        job_id=job_id,
-        status=job_status,
-        progress=job_progress,
-        current_step=job_step,
+        job_id=job.id,
+        status=job.status,
+        progress=job.progress,
+        current_step=job.current_step,
     )
 
 
 @router.get("/{form_id}/sections", response_model=FormSectionsResponse)
 async def get_sections(
     form_id: UUID,
+    auth: RequireOrgUser,
     session: AsyncSession,
 ):
-    form = await session.get(Form, form_id)
-    if not form:
-        raise HTTPException(status_code=404, detail="Form not found")
-
-    form_name = form.name
-    form_is_active = form.is_active
+    membership = await _get_user_org(session, UUID(auth.user_id))
+    form = await _get_org_form(session, form_id, membership.org_id)
 
     statement = (
         select(FormSection)
@@ -274,8 +315,8 @@ async def get_sections(
 
     return FormSectionsResponse(
         form_id=form_id,
-        name=form_name,
-        is_active=form_is_active,
+        name=form.name,
+        is_active=form.is_active,
         sections=section_responses,
     )
 
@@ -284,22 +325,20 @@ async def get_sections(
 async def update_sections(
     form_id: UUID,
     body: UpdateSectionsRequest,
+    auth: RequireOrgUser,
     session: AsyncSession,
 ):
-    form = await session.get(Form, form_id)
-    if not form:
-        raise HTTPException(status_code=404, detail="Form not found")
+    membership = await _get_user_org(session, UUID(auth.user_id))
+    form = await _get_org_form(session, form_id, membership.org_id)
 
     now = datetime.now(timezone.utc)
 
-    # Delete existing sections for this form
     existing = await session.exec(
         select(FormSection).where(FormSection.form_id == form_id)
     )
     for old in existing.all():
         await session.delete(old)
 
-    # Build new sections and capture response data before commit
     section_responses: list[SectionResponse] = []
     for s in body.sections:
         section_id = s.id or uuid4()
@@ -342,11 +381,11 @@ async def update_sections(
 async def update_styling(
     form_id: UUID,
     body: StylingRequest,
+    auth: RequireOrgUser,
     session: AsyncSession,
 ):
-    form = await session.get(Form, form_id)
-    if not form:
-        raise HTTPException(status_code=404, detail="Form not found")
+    membership = await _get_user_org(session, UUID(auth.user_id))
+    form = await _get_org_form(session, form_id, membership.org_id)
 
     form.styling = body.model_dump()
     form.updated_at = datetime.now(timezone.utc)
@@ -359,11 +398,11 @@ async def update_styling(
 @router.get("/{form_id}/styling", response_model=StylingResponse)
 async def get_styling(
     form_id: UUID,
+    auth: RequireOrgUser,
     session: AsyncSession,
 ):
-    form = await session.get(Form, form_id)
-    if not form:
-        raise HTTPException(status_code=404, detail="Form not found")
+    membership = await _get_user_org(session, UUID(auth.user_id))
+    form = await _get_org_form(session, form_id, membership.org_id)
 
     if not form.styling:
         raise HTTPException(status_code=404, detail="Styling not configured")
@@ -374,11 +413,11 @@ async def get_styling(
 @router.post("/{form_id}/activate", status_code=status.HTTP_204_NO_CONTENT)
 async def activate(
     form_id: UUID,
+    auth: RequireOrgUser,
     session: AsyncSession,
 ):
-    form = await session.get(Form, form_id)
-    if not form:
-        raise HTTPException(status_code=404, detail="Form not found")
+    membership = await _get_user_org(session, UUID(auth.user_id))
+    form = await _get_org_form(session, form_id, membership.org_id)
 
     if form.is_active:
         raise HTTPException(status_code=400, detail="Form is already active")
@@ -389,9 +428,80 @@ async def activate(
     await session.commit()
 
 
+@router.delete("/{form_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_form(
+    form_id: UUID,
+    auth: RequireOrgUser,
+    session: AsyncSession,
+):
+    membership = await _get_user_org(session, UUID(auth.user_id))
+    form = await _get_org_form(session, form_id, membership.org_id)
+
+    form.is_deleted = True
+    form.updated_at = datetime.now(timezone.utc)
+    session.add(form)
+    await session.commit()
+
+
+@router.post("/{form_id}/assign", status_code=status.HTTP_201_CREATED)
+async def assign_form(
+    form_id: UUID,
+    body: AssignFormRequest,
+    auth: RequireOrgUser,
+    session: AsyncSession,
+    keycloak: KeycloakAdminDep,
+):
+    """Assign a form to a user by email. Creates the user if they don't exist."""
+    membership = await _get_user_org(session, UUID(auth.user_id))
+    form = await _get_org_form(session, form_id, membership.org_id)
+
+    if not form.is_active:
+        raise HTTPException(status_code=400, detail="Form must be active before assigning")
+
+    email = body.email.lower()
+
+    # Find or create user in Keycloak
+    kc_user = await asyncio.to_thread(keycloak.find_user_by_email, email)
+    if not kc_user:
+        kc_user = await asyncio.to_thread(keycloak.create_user, email)
+
+    kc_user_id = UUID(kc_user["id"])
+
+    # Ensure local user record exists
+    user = await session.get(User, kc_user_id)
+    if not user:
+        user = User(id=kc_user_id, email=email)
+        session.add(user)
+
+    # Check not already assigned (pending)
+    existing = await session.exec(
+        select(FormSubmission).where(
+            FormSubmission.form_id == form_id,
+            FormSubmission.user_id == kc_user_id,
+            FormSubmission.completed_at == None,
+        )
+    )
+    if existing.first():
+        raise HTTPException(status_code=409, detail="Form is already assigned to this user")
+
+    submission = FormSubmission(
+        form_id=form_id,
+        user_id=kc_user_id,
+    )
+    session.add(submission)
+    await session.commit()
+
+    return {"submission_id": str(submission.id), "email": email}
+
+
+# =============================================================================
+# Standard user endpoints (form filling)
+# =============================================================================
+
 @router.get("/{form_id}/fill", response_model=FormFillResponse)
 async def get_form_for_filling(
     form_id: UUID,
+    auth: Authenticated,
     session: AsyncSession,
 ):
     form = await session.get(Form, form_id)
@@ -400,7 +510,11 @@ async def get_form_for_filling(
     if not form.is_active:
         raise HTTPException(status_code=400, detail="Form is not active")
 
-    # Load sections
+    # Get the org's public key for encryption
+    org = await session.get(Organization, form.org_id)
+    if not org or not org.public_key:
+        raise HTTPException(status_code=500, detail="Organization encryption not configured")
+
     result = await session.exec(
         select(FormSection)
         .where(FormSection.form_id == form_id)
@@ -408,7 +522,6 @@ async def get_form_for_filling(
     )
     sections = result.all()
 
-    # Build response — standard field values are handled client-side via the vault
     styling = StylingResponse(**form.styling) if form.styling else None
 
     section_responses = []
@@ -437,6 +550,7 @@ async def get_form_for_filling(
         form_id=form_id,
         name=form.name,
         summary=form.summary,
+        public_key=org.public_key,
         styling=styling,
         sections=section_responses,
     )
@@ -445,9 +559,10 @@ async def get_form_for_filling(
 @router.post("/{form_id}/submit", response_model=SubmitFormResponse, status_code=status.HTTP_201_CREATED)
 async def submit_form(
     form_id: UUID,
-    body: SubmitFormRequest,
+    request: Request,
     auth: Authenticated,
     session: AsyncSession,
+    container: BlobStorageContainer,
 ):
     form = await session.get(Form, form_id)
     if not form or form.is_deleted:
@@ -455,36 +570,41 @@ async def submit_form(
     if not form.is_active:
         raise HTTPException(status_code=400, detail="Form is not active")
 
+    user_id = UUID(auth.user_id)
     now = datetime.now(timezone.utc)
-    submission_id = uuid4()
 
-    # Save the submission
-    submission = FormSubmission(
-        id=submission_id,
-        form_id=form_id,
-        user_id=auth.user_id,
-        data=[f.model_dump() for f in body.fields],
-        created_at=now,
+    # Read encrypted payload from request body
+    encrypted_data = await request.body()
+
+    # Check for existing pending submission (assignment)
+    result = await session.exec(
+        select(FormSubmission).where(
+            FormSubmission.form_id == form_id,
+            FormSubmission.user_id == user_id,
+            FormSubmission.completed_at == None,
+        )
     )
+    submission = result.first()
+
+    if submission:
+        submission_id = submission.id
+    else:
+        submission_id = uuid4()
+        submission = FormSubmission(
+            id=submission_id,
+            form_id=form_id,
+            user_id=user_id,
+            created_at=now,
+        )
+
+    # Upload encrypted blob
+    blob_path = f"submissions/{submission_id}/data.enc"
+    blob_client = container.get_blob_client(blob_path)
+    blob_client.upload_blob(encrypted_data, overwrite=True)
+
+    submission.data_url = blob_client.url
+    submission.completed_at = now
     session.add(submission)
-
     await session.commit()
 
-    return SubmitFormResponse(
-        submission_id=submission_id,
-    )
-
-
-@router.delete("/{form_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_form(
-    form_id: UUID,
-    session: AsyncSession,
-):
-    form = await session.get(Form, form_id)
-    if not form:
-        raise HTTPException(status_code=404, detail="Form not found")
-
-    form.is_deleted = True
-    form.updated_at = datetime.now(timezone.utc)
-    session.add(form)
-    await session.commit()
+    return SubmitFormResponse(submission_id=submission_id)
