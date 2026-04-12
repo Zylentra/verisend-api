@@ -4,14 +4,6 @@ from typing import Literal
 from pydantic import BaseModel, EmailStr
 
 
-class SendMagicLinkRequest(BaseModel):
-    email: EmailStr
-
-
-class RefreshTokenRequest(BaseModel):
-    refresh_token: str
-
-
 class ConfirmRequest(BaseModel):
     name: str
     summary: str | None = None
@@ -76,32 +68,18 @@ class CreateOrgRequest(BaseModel):
     business_name: str | None = None
     registration_number: str | None = None
     address: str
-    public_key: str
-    encrypted_org_private_key: str  # encrypted with the owner's public key
 
 
 class InviteMemberRequest(BaseModel):
     email: EmailStr
 
 
-class CreateKeyGrantRequest(BaseModel):
-    encrypted_org_private_key: str  # encrypted with the member's public key
-
-
 class AssignFormRequest(BaseModel):
     email: EmailStr
 
 
-class SetupKeypairRequest(BaseModel):
-    public_key: str
-    encrypted_private_key: str
-
-
 class CreateOrgApiKeyRequest(BaseModel):
     name: str
-    public_key: str
-    encrypted_private_key: str
-    encrypted_org_private_key: str
 
 
 class StylingRequest(BaseModel):

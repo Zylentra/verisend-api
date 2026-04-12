@@ -1,8 +1,8 @@
-"""add tokens
+"""init
 
-Revision ID: 9e21c8c85805
+Revision ID: fca660ab248b
 Revises: 
-Create Date: 2026-04-12 17:22:07.883625
+Create Date: 2026-04-12 18:40:48.976146
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = '9e21c8c85805'
+revision: str = 'fca660ab248b'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -36,8 +36,6 @@ def upgrade() -> None:
     op.create_table('users',
     sa.Column('id', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('email', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('public_key', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
-    sa.Column('encrypted_private_key', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
@@ -49,7 +47,6 @@ def upgrade() -> None:
     sa.Column('registration_number', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.Column('address', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('owner_id', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('public_key', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['owner_id'], ['users.id'], ),
@@ -80,28 +77,12 @@ def upgrade() -> None:
     sa.Column('org_id', sa.Uuid(), nullable=False),
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('key_hash', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('public_key', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('encrypted_private_key', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('encrypted_org_private_key', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['org_id'], ['organizations.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_org_api_keys_key_hash'), 'org_api_keys', ['key_hash'], unique=True)
     op.create_index(op.f('ix_org_api_keys_org_id'), 'org_api_keys', ['org_id'], unique=False)
-    op.create_table('org_key_grants',
-    sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('org_id', sa.Uuid(), nullable=False),
-    sa.Column('user_id', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('encrypted_org_private_key', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['org_id'], ['organizations.id'], ),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('org_id', 'user_id')
-    )
-    op.create_index(op.f('ix_org_key_grants_org_id'), 'org_key_grants', ['org_id'], unique=False)
-    op.create_index(op.f('ix_org_key_grants_user_id'), 'org_key_grants', ['user_id'], unique=False)
     op.create_table('org_memberships',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('org_id', sa.Uuid(), nullable=False),
@@ -187,9 +168,6 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_org_memberships_user_id'), table_name='org_memberships')
     op.drop_index(op.f('ix_org_memberships_org_id'), table_name='org_memberships')
     op.drop_table('org_memberships')
-    op.drop_index(op.f('ix_org_key_grants_user_id'), table_name='org_key_grants')
-    op.drop_index(op.f('ix_org_key_grants_org_id'), table_name='org_key_grants')
-    op.drop_table('org_key_grants')
     op.drop_index(op.f('ix_org_api_keys_org_id'), table_name='org_api_keys')
     op.drop_index(op.f('ix_org_api_keys_key_hash'), table_name='org_api_keys')
     op.drop_table('org_api_keys')

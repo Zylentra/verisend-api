@@ -17,8 +17,6 @@ class User(SQLModel, table=True):
 
     id: str = Field(primary_key=True)  # Clerk user ID (e.g. "user_2abc123")
     email: str = Field(unique=True, index=True)
-    public_key: str | None = None
-    encrypted_private_key: str | None = None
 
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -26,7 +24,6 @@ class User(SQLModel, table=True):
     )
 
     memberships: list["OrgMembership"] = Relationship(back_populates="user")
-    key_grants: list["OrgKeyGrant"] = Relationship(back_populates="user")
 
 
 class Organization(SQLModel, table=True):
@@ -38,7 +35,6 @@ class Organization(SQLModel, table=True):
     registration_number: str | None = None
     address: str
     owner_id: str = Field(foreign_key="users.id", index=True)
-    public_key: str | None = None
 
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -51,7 +47,6 @@ class Organization(SQLModel, table=True):
 
     owner: User = Relationship()
     members: list["OrgMembership"] = Relationship(back_populates="organization")
-    key_grants: list["OrgKeyGrant"] = Relationship(back_populates="organization")
     api_keys: list["OrgApiKey"] = Relationship(back_populates="organization")
 
 
@@ -72,24 +67,6 @@ class OrgMembership(SQLModel, table=True):
     user: User = Relationship(back_populates="memberships")
 
 
-class OrgKeyGrant(SQLModel, table=True):
-    __tablename__ = "org_key_grants"  # type: ignore
-    __table_args__ = (UniqueConstraint("org_id", "user_id"),)
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    org_id: UUID = Field(foreign_key="organizations.id", index=True)
-    user_id: str = Field(foreign_key="users.id", index=True)
-    encrypted_org_private_key: str
-
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        sa_column=Column(DateTime(timezone=True), nullable=False),
-    )
-
-    organization: Organization = Relationship(back_populates="key_grants")
-    user: User = Relationship(back_populates="key_grants")
-
-
 class OrgApiKey(SQLModel, table=True):
     __tablename__ = "org_api_keys"  # type: ignore
 
@@ -97,9 +74,6 @@ class OrgApiKey(SQLModel, table=True):
     org_id: UUID = Field(foreign_key="organizations.id", index=True)
     name: str
     key_hash: str = Field(unique=True, index=True)
-    public_key: str
-    encrypted_private_key: str
-    encrypted_org_private_key: str
 
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -239,7 +213,3 @@ class StandardField(SQLModel, table=True):
     group: str | None = None
     default_options: list | None = Field(default=None, sa_column=Column(JSON))
     description: str | None = None
-
-
-
-

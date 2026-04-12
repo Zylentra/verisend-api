@@ -5,18 +5,16 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, status
 from sqlmodel import select
 
-from verisend.models.db_models import Organization, OrgMembership, OrgKeyGrant, OrgApiKey, User
+from verisend.models.db_models import Organization, OrgMembership, OrgApiKey, User
 from verisend.settings import settings
 from verisend.models.requests import (
     CreateOrgRequest,
     InviteMemberRequest,
-    CreateKeyGrantRequest,
     CreateOrgApiKeyRequest,
 )
 from verisend.models.responses import (
     OrgResponse,
     OrgMemberResponse,
-    KeyGrantResponse,
     OrgApiKeyResponse,
     OrgApiKeyCreatedResponse,
 )
@@ -76,7 +74,6 @@ async def create_org(
         registration_number=body.registration_number,
         address=body.address,
         owner_id=user_id,
-        public_key=body.public_key,
     )
     session.add(org)
     await session.flush()
@@ -84,14 +81,6 @@ async def create_org(
     # Owner is also a member
     membership = OrgMembership(org_id=org.id, user_id=user_id)
     session.add(membership)
-
-    # Owner's key grant
-    key_grant = OrgKeyGrant(
-        org_id=org.id,
-        user_id=user_id,
-        encrypted_org_private_key=body.encrypted_org_private_key,
-    )
-    session.add(key_grant)
 
     await session.commit()
     await session.refresh(org)
@@ -119,32 +108,22 @@ async def list_members(
     auth: RequireOrgUser,
     session: AsyncSession,
 ):
-    """List org members with their key grant status."""
+    """List org members."""
     org = await session.get(Organization, org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
     await _require_org_member(session, org_id, auth.user_id)
 
-    # Get all memberships with user data
     result = await session.exec(
         select(OrgMembership, User).join(User).where(OrgMembership.org_id == org_id)
     )
     memberships = result.all()
 
-    # Get existing key grants for this org
-    grant_result = await session.exec(
-        select(OrgKeyGrant.user_id).where(OrgKeyGrant.org_id == org_id)
-    )
-    granted_user_ids = set(grant_result.all())
-
     return [
         OrgMemberResponse(
             user_id=user.id,
             email=user.email,
-            has_public_key=user.public_key is not None,
-            public_key=user.public_key,
-            has_key_grant=user.id in granted_user_ids,
             created_at=membership.created_at,
         )
         for membership, user in memberships
@@ -200,9 +179,6 @@ async def invite_member(
     membership = OrgMembership(org_id=org_id, user_id=clerk_user_id)
     session.add(membership)
 
-    # Capture user values before commit
-    user_public_key = user.public_key
-
     await session.commit()
     await session.refresh(membership)
 
@@ -212,95 +188,8 @@ async def invite_member(
     return OrgMemberResponse(
         user_id=clerk_user_id,
         email=email,
-        has_public_key=user_public_key is not None,
-        public_key=user_public_key,
-        has_key_grant=False,
         created_at=membership.created_at,
     )
-
-
-@router.post(
-    "/{org_id}/members/{user_id}/key-grant",
-    response_model=KeyGrantResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_key_grant(
-    org_id: UUID,
-    user_id: str,
-    body: CreateKeyGrantRequest,
-    auth: RequireOrgUser,
-    session: AsyncSession,
-):
-    """
-    Grant a member access to the org's encrypted private key.
-    The caller must already have a key grant themselves.
-    """
-    org = await session.get(Organization, org_id)
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
-
-    # Verify caller has a key grant (meaning they have access to the org private key)
-    caller_grant = await session.exec(
-        select(OrgKeyGrant).where(
-            OrgKeyGrant.org_id == org_id,
-            OrgKeyGrant.user_id == auth.user_id,
-        )
-    )
-    if not caller_grant.first():
-        raise HTTPException(status_code=403, detail="You do not have key access to this organization")
-
-    # Verify target user is a member
-    await _require_org_member(session, org_id, user_id)
-
-    # Verify target user has a public key
-    target_user = await session.get(User, user_id)
-    if not target_user or not target_user.public_key:
-        raise HTTPException(status_code=400, detail="User has not set up their keypair yet")
-
-    # Check no existing grant
-    existing = await session.exec(
-        select(OrgKeyGrant).where(
-            OrgKeyGrant.org_id == org_id,
-            OrgKeyGrant.user_id == user_id,
-        )
-    )
-    if existing.first():
-        raise HTTPException(status_code=409, detail="User already has key access")
-
-    key_grant = OrgKeyGrant(
-        org_id=org_id,
-        user_id=user_id,
-        encrypted_org_private_key=body.encrypted_org_private_key,
-    )
-    session.add(key_grant)
-    await session.commit()
-    await session.refresh(key_grant)
-
-    return KeyGrantResponse(
-        org_id=key_grant.org_id,
-        user_id=key_grant.user_id,
-        created_at=key_grant.created_at,
-    )
-
-
-@router.get("/{org_id}/key-grant", response_model=CreateKeyGrantRequest)
-async def get_my_key_grant(
-    org_id: UUID,
-    auth: RequireOrgUser,
-    session: AsyncSession,
-):
-    """Get the authenticated user's key grant for this org."""
-    result = await session.exec(
-        select(OrgKeyGrant).where(
-            OrgKeyGrant.org_id == org_id,
-            OrgKeyGrant.user_id == auth.user_id,
-        )
-    )
-    grant = result.first()
-    if not grant:
-        raise HTTPException(status_code=404, detail="No key grant found")
-
-    return CreateKeyGrantRequest(encrypted_org_private_key=grant.encrypted_org_private_key)
 
 
 @router.post(
@@ -329,9 +218,6 @@ async def create_api_key(
         org_id=org_id,
         name=body.name,
         key_hash=key_hash,
-        public_key=body.public_key,
-        encrypted_private_key=body.encrypted_private_key,
-        encrypted_org_private_key=body.encrypted_org_private_key,
     )
     session.add(api_key)
     await session.commit()

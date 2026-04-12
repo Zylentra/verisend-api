@@ -6,32 +6,6 @@ from pydantic import BaseModel
 from verisend.models.requests import StylingRequest
 
 
-class SendMagicLinkResponse(BaseModel):
-    message: str
-    email: str
-
-
-class UserInfo(BaseModel):
-    id: str
-    email: str
-    first_name: str | None = ""
-    last_name: str | None = ""
-
-
-class VerifyTokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "Bearer"
-    expires_in: int
-    user: UserInfo
-
-
-class RefreshTokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    expires_in: int
-
-
 class UploadResponse(BaseModel):
     form_id: UUID
     pdf_url: str
@@ -110,22 +84,12 @@ class OrgResponse(BaseModel):
     registration_number: str | None
     address: str
     owner_id: str
-    public_key: str | None
     created_at: datetime
 
 
 class OrgMemberResponse(BaseModel):
     user_id: str
     email: str
-    has_public_key: bool
-    public_key: str | None
-    has_key_grant: bool
-    created_at: datetime
-
-
-class KeyGrantResponse(BaseModel):
-    org_id: UUID
-    user_id: str
     created_at: datetime
 
 
@@ -141,12 +105,6 @@ class OrgApiKeyCreatedResponse(OrgApiKeyResponse):
     api_key: str
 
 
-class KeypairStatusResponse(BaseModel):
-    has_keypair: bool
-    public_key: str | None
-    encrypted_private_key: str | None
-
-
 class UserOrgResponse(BaseModel):
     org_id: UUID
     name: str
@@ -156,7 +114,6 @@ class UserOrgResponse(BaseModel):
 class MeResponse(BaseModel):
     id: str
     email: str
-    has_keypair: bool
     orgs: list[UserOrgResponse]
 
 
@@ -205,6 +162,14 @@ class FillSectionResponse(BaseModel):
     fields: list[FillFieldResponse]
 
 
+class FormFillResponse(BaseModel):
+    form_id: UUID
+    name: str
+    summary: str | None
+    styling: StylingResponse | None
+    sections: list[FillSectionResponse]
+
+
 class ApiSubmissionListItem(BaseModel):
     submission_id: UUID
     form_id: UUID
@@ -217,20 +182,8 @@ class ApiSubmissionListItem(BaseModel):
 
 
 class ApiSubmissionDetailResponse(ApiSubmissionListItem):
-    encrypted_private_key: str
-    encrypted_org_private_key: str
+    pass
 
 
 class ApiSubmissionsListResponse(BaseModel):
     submissions: list[ApiSubmissionListItem]
-    encrypted_private_key: str
-    encrypted_org_private_key: str
-
-
-class FormFillResponse(BaseModel):
-    form_id: UUID
-    name: str
-    summary: str | None
-    public_key: str
-    styling: StylingResponse | None
-    sections: list[FillSectionResponse]

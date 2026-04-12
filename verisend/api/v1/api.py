@@ -76,11 +76,7 @@ async def list_submissions(
         for sub, form, user in result.all()
     ]
 
-    return ApiSubmissionsListResponse(
-        submissions=submissions,
-        encrypted_private_key=api_key.encrypted_private_key,
-        encrypted_org_private_key=api_key.encrypted_org_private_key,
-    )
+    return ApiSubmissionsListResponse(submissions=submissions)
 
 
 @router.get("/submissions/{submission_id}", response_model=ApiSubmissionDetailResponse)
@@ -89,7 +85,7 @@ async def get_submission(
     auth: Authenticated,
     session: AsyncSession,
 ):
-    """Get a single submission with decryption keys."""
+    """Get a single submission."""
     api_key = await _get_api_key(session, auth)
 
     submission = await session.get(FormSubmission, submission_id)
@@ -112,6 +108,4 @@ async def get_submission(
         data_url=submission.data_url,
         completed_at=submission.completed_at,
         created_at=submission.created_at,
-        encrypted_private_key=api_key.encrypted_private_key,
-        encrypted_org_private_key=api_key.encrypted_org_private_key,
     )

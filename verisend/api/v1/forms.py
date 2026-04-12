@@ -518,11 +518,6 @@ async def get_form_for_filling(
     if not form.is_active:
         raise HTTPException(status_code=400, detail="Form is not active")
 
-    # Get the org's public key for encryption
-    org = await session.get(Organization, form.org_id)
-    if not org or not org.public_key:
-        raise HTTPException(status_code=500, detail="Organization encryption not configured")
-
     result = await session.exec(
         select(FormSection)
         .where(FormSection.form_id == form_id)
@@ -558,7 +553,6 @@ async def get_form_for_filling(
         form_id=form_id,
         name=form.name,
         summary=form.summary,
-        public_key=org.public_key,
         styling=styling,
         sections=section_responses,
     )
@@ -581,8 +575,7 @@ async def submit_form(
     user_id = auth.user_id
     now = datetime.now(timezone.utc)
 
-    # Read encrypted payload from request body
-    encrypted_data = await request.body()
+    data = await request.body()
 
     # Check for existing pending submission (assignment)
     result = await session.exec(
@@ -605,10 +598,9 @@ async def submit_form(
             created_at=now,
         )
 
-    # Upload encrypted blob
-    blob_path = f"submissions/{submission_id}/data.enc"
+    blob_path = f"submissions/{submission_id}/data.json"
     blob_client = container.get_blob_client(blob_path)
-    blob_client.upload_blob(encrypted_data, overwrite=True)
+    blob_client.upload_blob(data, overwrite=True)
 
     submission.data_url = blob_client.url
     submission.completed_at = now

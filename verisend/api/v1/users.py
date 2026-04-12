@@ -5,25 +5,23 @@ from fastapi.responses import Response
 
 from sqlmodel import select
 from verisend.models.db_models import OrgMembership, Organization, User
-from verisend.models.requests import SetupKeypairRequest
-from verisend.models.responses import KeypairStatusResponse, MeResponse, UserOrgResponse
+from verisend.models.responses import MeResponse, UserOrgResponse
 from verisend.utils.auth import Authenticated
 from verisend.utils.blob_storage import BlobStorageContainer
+from verisend.utils.clerk import ClerkDep
 from verisend.utils.db import AsyncSession
+from verisend.models.roles import Role
 
 logger = logging.getLogger(__name__)
 
 TAGS = [
     {
         "name": "Users",
-        "description": "User profile, keypair, and vault endpoints",
+        "description": "User profile and vault endpoints",
     },
 ]
 
 router = APIRouter(prefix="/users", tags=["Users"])
-
-
-# ---- Profile ----
 
 
 @router.get("/me", response_model=MeResponse)
@@ -31,10 +29,15 @@ async def get_me(
     auth: Authenticated,
     session: AsyncSession,
 ):
-    """Get the authenticated user's profile including org memberships."""
+    """Get the authenticated user's profile including org memberships.
+    Creates the local user record on first sign-in (Clerk manages the actual account).
+    """
     user = await session.get(User, auth.user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        user = User(id=auth.user_id, email=auth.email or "")
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
 
     result = await session.exec(
         select(OrgMembership, Organization)
@@ -54,56 +57,24 @@ async def get_me(
     return MeResponse(
         id=str(user.id),
         email=user.email,
-        has_keypair=user.public_key is not None,
         orgs=orgs,
     )
 
 
-# ---- Keypair ----
-
-
-@router.post("/me/keypair", status_code=status.HTTP_204_NO_CONTENT)
-async def setup_keypair(
-    body: SetupKeypairRequest,
+@router.post("/me/downgrade", status_code=status.HTTP_204_NO_CONTENT)
+async def downgrade_to_user(
     auth: Authenticated,
-    session: AsyncSession,
+    clerk: ClerkDep,
 ):
-    """Save the user's public key and encrypted private key. Called once during vault setup."""
-    user = await session.get(User, auth.user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if user.public_key is not None:
-        raise HTTPException(status_code=409, detail="Keypair already set up")
-
-    user.public_key = body.public_key
-    user.encrypted_private_key = body.encrypted_private_key
-    session.add(user)
-    await session.commit()
-
-
-@router.get("/me/keypair", response_model=KeypairStatusResponse)
-async def get_keypair(
-    auth: Authenticated,
-    session: AsyncSession,
-):
-    """Get the user's keypair status and encrypted private key."""
-    user = await session.get(User, auth.user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    return KeypairStatusResponse(
-        has_keypair=user.public_key is not None,
-        public_key=user.public_key,
-        encrypted_private_key=user.encrypted_private_key,
-    )
+    """Clear the org_user role from Clerk metadata, reverting to standard user."""
+    clerk.set_user_role(auth.user_id, Role.USER)
 
 
 # ---- Vault ----
 
 
 def _vault_path(user_id: str) -> str:
-    return f"vaults/{user_id}/vault.enc"
+    return f"vaults/{user_id}/vault.json"
 
 
 @router.put("/me/vault", status_code=status.HTTP_204_NO_CONTENT)
@@ -112,6 +83,7 @@ async def save_vault(
     auth: Authenticated,
     container: BlobStorageContainer,
 ):
+    """Save the user's vault data."""
     body = await request.body()
     blob_client = container.get_blob_client(_vault_path(auth.user_id))
     blob_client.upload_blob(body, overwrite=True)
@@ -122,10 +94,11 @@ async def get_vault(
     auth: Authenticated,
     container: BlobStorageContainer,
 ):
+    """Get the user's vault data. Returns empty object for new users."""
     blob_client = container.get_blob_client(_vault_path(auth.user_id))
 
     if not blob_client.exists():
-        raise HTTPException(status_code=404, detail="No vault found")
+        return Response(content=b"{}", media_type="application/json")
 
     data = blob_client.download_blob().readall()
-    return Response(content=data, media_type="application/octet-stream")
+    return Response(content=data, media_type="application/json")
