@@ -25,6 +25,7 @@ from verisent.models.responses import (
     FormListItem,
     FormSectionsResponse,
     JobStatusResponse,
+    LogoUploadResponse,
     SectionResponse,
     SubmissionDetailResponse,
     SubmissionListItem,
@@ -36,6 +37,7 @@ from verisent.models.responses import (
 from verisent.agents.styling_agent import extract_styling_from_url
 from verisent.agents.summarise_agent import summarise_form
 from verisent.utils.email import send_form_assignment_email
+from verisent.utils.logo import MAX_BYTES as LOGO_MAX_BYTES, store_logo_bytes
 from verisent.utils.pdf import render_first_page_thumbnail_async
 from verisent.workers.tasks import extract_form
 
@@ -164,13 +166,37 @@ async def list_assigned_forms(
 
 
 @router.post("/styling/extract", response_model=StylingResponse)
-async def extract_styling(body: ExtractStylingRequest, auth: RequireOrgUser):
+async def extract_styling(
+    body: ExtractStylingRequest,
+    auth: RequireOrgUser,
+    container: BlobStorageContainer,
+):
     try:
-        extracted = await extract_styling_from_url(body.url, body.available_fonts)
+        extracted = await extract_styling_from_url(body.url, body.available_fonts, container)
     except Exception as e:
         logger.exception("Styling extraction failed for URL: %s", body.url)
         raise HTTPException(status_code=422, detail=f"Could not extract styling: {e}")
     return StylingResponse(**extracted.model_dump())
+
+
+@router.post("/styling/logo", response_model=LogoUploadResponse)
+async def upload_styling_logo(
+    auth: RequireOrgUser,
+    container: BlobStorageContainer,
+    file: UploadFile = File(...),
+):
+    """Upload a brand logo file. Returns the public blob URL."""
+    data = await file.read(LOGO_MAX_BYTES + 1)
+    if len(data) > LOGO_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Logo exceeds {LOGO_MAX_BYTES} byte cap",
+        )
+    try:
+        logo_url = await store_logo_bytes(data, container)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return LogoUploadResponse(logo_url=logo_url)
 
 
 @router.post("/upload", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)

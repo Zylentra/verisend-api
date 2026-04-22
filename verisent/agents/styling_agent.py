@@ -1,12 +1,17 @@
+import logging
 from typing import Literal
 
 import httpx
+from azure.storage.blob import ContainerClient
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
 from verisent.settings import settings
+from verisent.utils.logo import download_and_store_logo
+
+logger = logging.getLogger(__name__)
 
 
 class ExtractedStyling(BaseModel):
@@ -23,6 +28,16 @@ class ExtractedStyling(BaseModel):
     border_radius: Literal["none", "sm", "md", "lg", "full"] = Field(description="Border radius style inferred from the site's design")
     spacing: Literal["compact", "comfortable", "spacious"] = Field(description="Overall spacing density")
     button_style: Literal["filled", "outlined"] = Field(description="Whether buttons are primarily filled or outlined")
+    logo_url: str | None = Field(
+        default=None,
+        description=(
+            "URL of the brand's logo image as it appears in the HTML. Look for an <img> inside "
+            "the header/nav whose class, id, or alt attribute contains 'logo'. Fall back to the "
+            "<link rel='icon'> / apple-touch-icon href if no logo image is obvious. Return the "
+            "raw src/href value exactly as it appears — it may be absolute or relative; do not "
+            "rewrite it. Return null if nothing plausible is found."
+        ),
+    )
 
 
 provider = GoogleProvider(api_key=settings.gemini_api_key.get_secret_value())
@@ -42,7 +57,10 @@ styling_agent = Agent(
         "You will be given a list of available fonts — pick the closest match from that list.\n"
         "- Spacing & shape: infer whether the design is compact/comfortable/spacious and "
         "whether it uses rounded corners (and how much).\n"
-        "- Buttons: determine if the primary button style is filled or outlined.\n\n"
+        "- Buttons: determine if the primary button style is filled or outlined.\n"
+        "- Logo: find the brand's logo image URL. Prefer an <img> with class/id/alt mentioning "
+        "'logo' inside the header or nav. Fall back to favicon/apple-touch-icon links. "
+        "Return the src/href exactly as written; do not resolve it.\n\n"
         "All colors must be returned as hex values (e.g. '#1A73E8').\n"
         "If a value cannot be confidently determined, use a sensible default that fits the overall palette.\n"
         "Do not hallucinate — base your answers on what is actually in the HTML/CSS."
@@ -50,10 +68,15 @@ styling_agent = Agent(
 )
 
 
-async def extract_styling_from_url(url: str, available_fonts: dict[str, str]) -> ExtractedStyling:
+async def extract_styling_from_url(
+    url: str,
+    available_fonts: dict[str, str],
+    container: ContainerClient,
+) -> ExtractedStyling:
     async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
         response = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
         response.raise_for_status()
+        final_url = str(response.url)
 
     # Trim to a reasonable size for the LLM context
     html = response.text[:50_000]
@@ -63,4 +86,15 @@ async def extract_styling_from_url(url: str, available_fonts: dict[str, str]) ->
         f"Available fonts (return the ID of the closest match):\n{fonts}\n\n"
         f"Extract the styling/brand identity from this website HTML:\n\n{html}"
     )
-    return result.output
+    extracted = result.output
+
+    if extracted.logo_url:
+        try:
+            extracted.logo_url = await download_and_store_logo(
+                extracted.logo_url, final_url, container
+            )
+        except Exception as e:
+            logger.warning("Dropping logo from extraction (%s): %s", extracted.logo_url, e)
+            extracted.logo_url = None
+
+    return extracted

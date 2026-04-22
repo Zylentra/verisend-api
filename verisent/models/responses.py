@@ -145,6 +145,10 @@ class StylingResponse(StylingRequest):
     pass
 
 
+class LogoUploadResponse(BaseModel):
+    logo_url: str
+
+
 class FillFieldResponse(BaseModel):
     label: str
     field_type: str
